@@ -1,5 +1,8 @@
 #include <Arduino.h>
 #include "driver/ledc.h"
+#include "xtensa/core-macros.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/portmacro.h"
 
 // Pines del puente H L9110S
 #define MOTOR_A 12
@@ -8,6 +11,36 @@
 // Configuración PWM
 #define PWM_FREQ 1000
 #define PWM_RES LEDC_TIMER_10_BIT
+
+// Pin del botón de emergencia
+#define BUTTON_PIN 33
+
+// Tiempo de debounce: 4 millones de ciclos
+#define DEBOUNCE_CYCLES 4000000UL
+
+// Variables compartidas con la interrupción
+volatile bool emergencyEvent = false;
+volatile uint32_t pressCount = 0;
+volatile uint32_t lastCycle = 0;
+
+// Spinlock para proteger las variables
+portMUX_TYPE isrMux = portMUX_INITIALIZER_UNLOCKED;
+
+void IRAM_ATTR emergencyISR() {
+
+    uint32_t currentCycles = XTHAL_GET_CCOUNT();
+
+    portENTER_CRITICAL_ISR(&isrMux);
+
+    if ((uint32_t)(currentCycles - lastCycle) >= DEBOUNCE_CYCLES) {
+
+        emergencyEvent = true;
+        pressCount++;
+        lastCycle = currentCycles;
+    }
+
+    portEXIT_CRITICAL_ISR(&isrMux);
+}
 
 // Motor hacia adelante
 void motorForward(uint32_t velocidad) {
@@ -38,6 +71,8 @@ void motorCoast() {
     ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1);
 }
 
+
+
 void setup() {
 
     ledc_timer_config_t timer = {};
@@ -63,8 +98,34 @@ void setup() {
     canalB.channel = LEDC_CHANNEL_1;
 
     ledc_channel_config(&canalB);
-}
+
+
+// Configurar botón de emergencia
+pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+// Activar interrupción en flanco de bajada
+attachInterrupt(
+    digitalPinToInterrupt(BUTTON_PIN),
+    emergencyISR,
+    FALLING
+);
+
+} // Cierre de setup()
 
 void loop() {
 
+    bool eventoDetectado = false;
+
+    // Acceder de forma segura a la variable compartida
+    portENTER_CRITICAL(&isrMux);
+
+    eventoDetectado = emergencyEvent;
+    emergencyEvent = false;
+
+    portEXIT_CRITICAL(&isrMux);
+
+    // Procesar el evento fuera de la sección crítica
+    if (eventoDetectado) {
+        // Aquí conectaremos posteriormente la FSM
+    }
 }
