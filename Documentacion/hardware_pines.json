@@ -24,7 +24,7 @@
     "gpio": 33,
     "modo": "INPUT_PULLUP",
     "interrupcion": "FALLING",
-    "debounce_ms": 25,
+    "debounce_ciclos": 4000000,
     "funcion": "Paro de emergencia"
   },
 

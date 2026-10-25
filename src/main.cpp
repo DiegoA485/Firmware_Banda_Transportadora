@@ -18,6 +18,7 @@ constexpr uint32_t DEBOUNCE_CYCLES = 4000000UL;
 volatile bool emergencyEvent = false;
 volatile uint32_t pressCount = 0;
 volatile uint32_t lastCycle = 0;
+volatile bool firstPress = true;
 
 portMUX_TYPE isrMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -31,19 +32,22 @@ void IRAM_ATTR emergencyISR() {
 
     portENTER_CRITICAL_ISR(&isrMux);
 
-    if ((uint32_t)(currentCycles - lastCycle)
-        >= DEBOUNCE_CYCLES) {
+    if (firstPress ||
+        (uint32_t)(currentCycles - lastCycle)
+            >= DEBOUNCE_CYCLES) {
+
+        firstPress = false;
+        lastCycle = currentCycles;
 
         emergencyEvent = true;
         pressCount++;
-        lastCycle = currentCycles;
     }
 
     portEXIT_CRITICAL_ISR(&isrMux);
 }
 
 // ==========================================
-// COMANDOS SERIALES NO BLOQUEANTES
+// COMANDOS SERIALES
 // ==========================================
 
 char serialBuffer[16];
@@ -81,10 +85,21 @@ void processSerialCommand() {
 
     if (command == "START") {
 
+        // No arrancar con emergencia presionada
         if (digitalRead(BUTTON_PIN) == LOW) {
-            Serial.println(
-                "[ERROR] Emergencia activada"
-            );
+            Serial.println("[ERROR] Emergencia activada");
+            return;
+        }
+
+        // No arrancar si existe un evento pendiente
+        bool pendingEmergency;
+
+        portENTER_CRITICAL(&isrMux);
+        pendingEmergency = emergencyEvent;
+        portEXIT_CRITICAL(&isrMux);
+
+        if (pendingEmergency) {
+            Serial.println("[ERROR] Emergencia pendiente");
             return;
         }
 
@@ -95,9 +110,7 @@ void processSerialCommand() {
     } else if (command == "RESET") {
 
         if (digitalRead(BUTTON_PIN) == LOW) {
-            Serial.println(
-                "[ERROR] Libere el boton de emergencia"
-            );
+            Serial.println("[ERROR] Libere la emergencia");
             return;
         }
 
@@ -119,14 +132,12 @@ void setup() {
 
     Serial.begin(115200);
 
-    // Configurar boton antes de habilitar la ISR
     pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-    // Inicializar motor y FSM
     motorInit();
     fsmInit();
 
-    // Si el boton ya esta presionado al arrancar
+    // Detectar emergencia al encender
     if (digitalRead(BUTTON_PIN) == LOW) {
         processEvent(Event::EMERGENCY);
     }
@@ -148,24 +159,39 @@ void setup() {
 void loop() {
 
     bool eventoDetectado = false;
+    uint32_t currentCount = 0;
 
-    // Leer y limpiar bandera de forma segura
+    // Acceso protegido a variables compartidas
     portENTER_CRITICAL(&isrMux);
 
     eventoDetectado = emergencyEvent;
     emergencyEvent = false;
+    currentCount = pressCount;
 
     portEXIT_CRITICAL(&isrMux);
 
-    // Prioridad para el paro de emergencia
+    // La emergencia tiene prioridad
     if (eventoDetectado ||
         digitalRead(BUTTON_PIN) == LOW) {
 
         if (getCurrentState() != State::FAULT) {
             processEvent(Event::EMERGENCY);
         }
+
+        if (eventoDetectado) {
+            Serial.printf(
+                "[Metrics] Pulsaciones: %lu\n",
+                (unsigned long)currentCount
+            );
+        }
     }
 
-    // Procesar comandos seriales
     processSerialCommand();
+
+    // Verificacion adicional tras procesar comandos
+    if (digitalRead(BUTTON_PIN) == LOW &&
+        getCurrentState() != State::FAULT) {
+
+        processEvent(Event::EMERGENCY);
+    }
 }
