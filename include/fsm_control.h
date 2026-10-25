@@ -1,20 +1,19 @@
 
-#ifndef FSM_CONTROL_H
-#define FSM_CONTROL_H
+#pragma once
 
 #include <Arduino.h>
 
 // Estados de la banda transportadora
-enum class State {
-    IDLE,
+enum class State : uint8_t {
+    IDLE = 0,
     RUNNING,
     FAULT,
     COUNT
 };
 
 // Eventos del sistema
-enum class Event {
-    NONE,
+enum class Event : uint8_t {
+    NONE = 0,
     START,
     EMERGENCY,
     RESET,
@@ -27,9 +26,7 @@ struct Transition {
     void (*action)();
 };
 
-// Funciones de la FSM
+// Funciones de la máquina de estados
 void fsmInit();
 void processEvent(Event event);
 State getCurrentState();
-
-#endif

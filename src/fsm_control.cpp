@@ -38,7 +38,9 @@ void onNoOp() {
 // Columnas: NONE, START, EMERGENCY, RESET
 // Filas: IDLE, RUNNING, FAULT
 
-constexpr Transition transitionTable[3][4] = {
+constexpr Transition FSM_TABLE
+    [static_cast<size_t>(State::COUNT)]
+    [static_cast<size_t>(Event::COUNT)] = {
 
     // Estado IDLE
     {
@@ -70,7 +72,6 @@ constexpr Transition transitionTable[3][4] = {
 // ==========================================
 
 void fsmInit() {
-
     currentState = State::IDLE;
     onEnterIdle();
 }
@@ -92,8 +93,8 @@ void processEvent(Event event) {
         return;
     }
 
-    Transition transition =
-        transitionTable[stateIndex][eventIndex];
+    const Transition& transition =
+        FSM_TABLE[stateIndex][eventIndex];
 
     if (transition.nextState != currentState) {
 

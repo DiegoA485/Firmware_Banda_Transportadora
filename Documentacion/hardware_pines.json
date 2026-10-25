@@ -1,0 +1,44 @@
+
+{
+  "proyecto": "Firmware Banda Transportadora",
+  "microcontrolador": "ESP32",
+  "framework": "Arduino",
+  "plataforma": "PlatformIO",
+
+  "motor": {
+    "controlador": "L9110S",
+    "tipo_control": "PWM",
+    "pines": {
+      "MOTOR_A": 12,
+      "MOTOR_B": 14
+    },
+    "configuracion_pwm": {
+      "frecuencia_hz": 1000,
+      "resolucion_bits": 10,
+      "duty_maximo": 1023,
+      "duty_configurado": 700
+    }
+  },
+
+  "boton_emergencia": {
+    "gpio": 33,
+    "modo": "INPUT_PULLUP",
+    "interrupcion": "FALLING",
+    "debounce_ms": 25,
+    "funcion": "Paro de emergencia"
+  },
+
+  "maquina_estados": {
+    "estados": [
+      "IDLE",
+      "RUNNING",
+      "FAULT"
+    ],
+    "eventos": [
+      "NONE",
+      "START",
+      "EMERGENCY",
+      "RESET"
+    ]
+  }
+}

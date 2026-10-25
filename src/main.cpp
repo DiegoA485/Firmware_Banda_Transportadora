@@ -1,5 +1,6 @@
 
 #include <Arduino.h>
+#include "xtensa/core-macros.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 
@@ -7,59 +8,129 @@
 #include "fsm_control.h"
 
 // ==========================================
-// FASE 3: INTERRUPCIÓN DE EMERGENCIA
+// CONFIGURACION DE EMERGENCIA
 // ==========================================
 
-#define BUTTON_PIN 33
-#define DEBOUNCE_MS 25
+constexpr uint8_t BUTTON_PIN = 33;
+constexpr uint32_t DEBOUNCE_CYCLES = 4000000UL;
 
-// Variables compartidas con la interrupción
+// Variables compartidas con la ISR
 volatile bool emergencyEvent = false;
 volatile uint32_t pressCount = 0;
-volatile uint32_t lastPressMs = 0;
+volatile uint32_t lastCycle = 0;
 
-// Protección de variables compartidas
 portMUX_TYPE isrMux = portMUX_INITIALIZER_UNLOCKED;
 
 // ==========================================
-// INTERRUPCIÓN ISR
+// INTERRUPCION DE EMERGENCIA
 // ==========================================
 
 void IRAM_ATTR emergencyISR() {
 
-    uint32_t currentMs = millis();
+    uint32_t currentCycles = XTHAL_GET_CCOUNT();
 
     portENTER_CRITICAL_ISR(&isrMux);
 
-    if ((uint32_t)(currentMs - lastPressMs)
-        >= DEBOUNCE_MS) {
+    if ((uint32_t)(currentCycles - lastCycle)
+        >= DEBOUNCE_CYCLES) {
 
         emergencyEvent = true;
         pressCount++;
-        lastPressMs = currentMs;
+        lastCycle = currentCycles;
     }
 
     portEXIT_CRITICAL_ISR(&isrMux);
 }
 
 // ==========================================
-// CONFIGURACIÓN INICIAL
+// COMANDOS SERIALES NO BLOQUEANTES
+// ==========================================
+
+char serialBuffer[16];
+uint8_t serialIndex = 0;
+
+void processSerialCommand() {
+
+    if (Serial.available() == 0) {
+        return;
+    }
+
+    char received = Serial.read();
+
+    if (received == '\r') {
+        return;
+    }
+
+    if (received != '\n') {
+
+        if (serialIndex < sizeof(serialBuffer) - 1) {
+            serialBuffer[serialIndex++] = received;
+        } else {
+            serialIndex = 0;
+        }
+
+        return;
+    }
+
+    serialBuffer[serialIndex] = '\0';
+    serialIndex = 0;
+
+    String command = String(serialBuffer);
+    command.trim();
+    command.toUpperCase();
+
+    if (command == "START") {
+
+        if (digitalRead(BUTTON_PIN) == LOW) {
+            Serial.println(
+                "[ERROR] Emergencia activada"
+            );
+            return;
+        }
+
+        if (getCurrentState() == State::IDLE) {
+            processEvent(Event::START);
+        }
+
+    } else if (command == "RESET") {
+
+        if (digitalRead(BUTTON_PIN) == LOW) {
+            Serial.println(
+                "[ERROR] Libere el boton de emergencia"
+            );
+            return;
+        }
+
+        if (getCurrentState() == State::FAULT) {
+            processEvent(Event::RESET);
+        }
+
+    } else if (command.length() > 0) {
+
+        Serial.println("[ERROR] Comando desconocido");
+    }
+}
+
+// ==========================================
+// CONFIGURACION INICIAL
 // ==========================================
 
 void setup() {
 
     Serial.begin(115200);
 
-    // Inicializar controlador PWM del motor
-    motorInit();
-
-    // Inicializar máquina de estados
-    fsmInit();
-
-    // Configurar botón de emergencia
+    // Configurar boton antes de habilitar la ISR
     pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-    // Activar interrupción
+    // Inicializar motor y FSM
+    motorInit();
+    fsmInit();
+
+    // Si el boton ya esta presionado al arrancar
+    if (digitalRead(BUTTON_PIN) == LOW) {
+        processEvent(Event::EMERGENCY);
+    }
+
     attachInterrupt(
         digitalPinToInterrupt(BUTTON_PIN),
         emergencyISR,
@@ -67,6 +138,7 @@ void setup() {
     );
 
     Serial.println("Sistema inicializado");
+    Serial.println("Comandos: START / RESET");
 }
 
 // ==========================================
@@ -77,7 +149,7 @@ void loop() {
 
     bool eventoDetectado = false;
 
-    // Leer evento de manera segura
+    // Leer y limpiar bandera de forma segura
     portENTER_CRITICAL(&isrMux);
 
     eventoDetectado = emergencyEvent;
@@ -85,9 +157,15 @@ void loop() {
 
     portEXIT_CRITICAL(&isrMux);
 
-    // Procesar únicamente el paro de emergencia
-    if (eventoDetectado) {
+    // Prioridad para el paro de emergencia
+    if (eventoDetectado ||
+        digitalRead(BUTTON_PIN) == LOW) {
 
-        processEvent(Event::EMERGENCY);
+        if (getCurrentState() != State::FAULT) {
+            processEvent(Event::EMERGENCY);
+        }
     }
+
+    // Procesar comandos seriales
+    processSerialCommand();
 }
